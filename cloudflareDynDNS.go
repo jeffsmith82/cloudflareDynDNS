@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -16,6 +17,13 @@ var (
 	httpClient = http.Client{
 		Transport: &http.Transport{
 			MaxIdleConnsPerHost: 10,
+		},
+		Timeout: time.Duration(10 * time.Second),
+	}
+	badhttpClient = http.Client{
+		Transport: &http.Transport{
+			MaxIdleConnsPerHost: 10,
+			TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 		},
 		Timeout: time.Duration(10 * time.Second),
 	}
@@ -45,7 +53,8 @@ type DNSRecord struct {
 }
 
 type ips struct {
-	IP string `json:"ip"`
+	IP      string `json:"ip"`
+	Address string `json:"address"`
 }
 
 func main() {
@@ -57,12 +66,16 @@ func main() {
 	flag.BoolVar(&debug, "debug", false, "should debug logging be switched on")
 	flag.Parse()
 
-	// Get the IP address from ipify
-	ip := getIP()
+	ipv4Update()
+	ipv6Update()
 
+}
+
+func ipv4Update() {
+	ip := getIP()
 	//Grab the ID of the DNS reocrd we want from cloudflare
 	//TODO Compare IP addresses and if its the same do nothing
-	id, ipadd := getARecordID()
+	id, ipadd := getARecordID("A")
 	if ipadd == ip.IP {
 		fmt.Println("We are up to date so exiting")
 		return
@@ -72,20 +85,43 @@ func main() {
 	if len(id) == 0 {
 		//We dont have a record so we update it
 		fmt.Println("Creating", recordname, "with IP Address", ip.IP)
-		createRecord(ip.IP)
+		createRecord(ip.IP, "A")
 	} else {
 		//We have a record so we must update it
 		fmt.Println("Updating", recordname, "with IP Address", ip.IP)
-		updateRecords(id, ip.IP)
+		updateRecords(id, ip.IP, "A")
 	}
 
 }
 
-func getARecordID() (string, string) {
+func ipv6Update() {
+
+	// Get the IP address from ident.me
+	ip6 := getIPv6()
+
+	id6, ipadd6 := getARecordID("AAAA")
+	if ipadd6 == ip6.Address {
+		fmt.Println("We are up to date so exiting")
+		return
+	}
+
+	//Use the IP address we have got to update a record in cloudflare
+	if len(id6) == 0 {
+		//We dont have a record so we update it
+		fmt.Println("Creating", recordname, "with IP Address", ip6.Address)
+		createRecord(ip6.Address, "AAAA")
+	} else {
+		//We have a record so we must update it
+		fmt.Println("Updating", recordname, "with IP Address", ip6.Address)
+		updateRecords(id6, ip6.Address, "AAAA")
+	}
+}
+
+func getARecordID(recordType string) (string, string) {
 
 	safe := url.QueryEscape(recordname)
 
-	req, err := http.NewRequest("GET", "https://api.cloudflare.com/client/v4/zones/"+zoneID+"/dns_records?type=A&name="+safe, nil)
+	req, err := http.NewRequest("GET", "https://api.cloudflare.com/client/v4/zones/"+zoneID+"/dns_records?type="+recordType+"&name="+safe, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -113,7 +149,7 @@ func getARecordID() (string, string) {
 
 }
 
-func createRecord(ip string) {
+func createRecord(ip string, recordType string) {
 
 	data := struct {
 		Type    string `json:"type"`
@@ -121,7 +157,7 @@ func createRecord(ip string) {
 		Content string `json:"content"`
 		Proxied bool   `json:"proxied"`
 	}{
-		"A",
+		recordType,
 		recordname,
 		ip,
 		false,
@@ -157,7 +193,7 @@ func createRecord(ip string) {
 	}
 }
 
-func updateRecords(id string, ip string) {
+func updateRecords(id string, ip string, recordType string) {
 
 	data := struct {
 		Type    string `json:"type"`
@@ -165,7 +201,7 @@ func updateRecords(id string, ip string) {
 		Content string `json:"content"`
 		Proxied bool   `json:"proxied"`
 	}{
-		"A",
+		recordType,
 		recordname,
 		ip,
 		false,
@@ -209,6 +245,34 @@ func getIP() ips {
 		log.Fatal(err)
 	}
 	resp, err := httpClient.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		log.Fatal("Non 200 status code from api.ipify.org" + string(resp.StatusCode))
+	}
+
+	ipBody, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatal("Could not read body from api.ipify.orgr" + err.Error())
+	}
+
+	ip := ips{}
+	json.Unmarshal(ipBody, &ip)
+	return ip
+}
+
+func getIPv6() ips {
+
+	//request our IP address from
+	req, err := http.NewRequest("GET", "https://v6.ident.me/.json", nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	//This site has an invalid https cert so ignoring it for now
+	resp, err := badhttpClient.Do(req)
 	if err != nil {
 		log.Fatal(err)
 	}
