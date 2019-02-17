@@ -29,6 +29,7 @@ var (
 	}
 
 	zoneID     string
+	zoneName   string
 	apikey     string
 	recordname string
 	email      string
@@ -63,6 +64,7 @@ func main() {
 	flag.StringVar(&apikey, "apikey", "", "cloudflare apikey")
 	flag.StringVar(&recordname, "recordname", "", "cloudflare A or AAAA recordname")
 	flag.StringVar(&email, "email", "", "cloudflare email address")
+	flag.StringVar(&zoneName, "zonename", "", "name of the dns zone")
 	flag.BoolVar(&debug, "debug", false, "should debug logging be switched on")
 	flag.Parse()
 
@@ -73,17 +75,17 @@ func main() {
 
 func ipv4Update() {
 	ip := getIP()
-	//Grab the ID of the DNS reocrd we want from cloudflare
+	//Grab the ID of the DNS record we want from cloudflare
 	//TODO Compare IP addresses and if its the same do nothing
 	id, ipadd := getARecordID("A")
 	if ipadd == ip.IP {
-		fmt.Println("We are up to date so exiting")
+		fmt.Println("Our A record is up to date so exiting")
 		return
 	}
 
 	//Use the IP address we have got to update a record in cloudflare
 	if len(id) == 0 {
-		//We dont have a record so we update it
+		//We dont have a record so we create it
 		fmt.Println("Creating", recordname, "with IP Address", ip.IP)
 		createRecord(ip.IP, "A")
 	} else {
@@ -101,7 +103,7 @@ func ipv6Update() {
 
 	id6, ipadd6 := getARecordID("AAAA")
 	if ipadd6 == ip6.Address {
-		fmt.Println("We are up to date so exiting")
+		fmt.Println("Our AAAA records is up to date so exiting")
 		return
 	}
 
@@ -119,7 +121,7 @@ func ipv6Update() {
 
 func getARecordID(recordType string) (string, string) {
 
-	safe := url.QueryEscape(recordname)
+	safe := url.QueryEscape(recordname + "." + zoneName)
 
 	req, err := http.NewRequest("GET", "https://api.cloudflare.com/client/v4/zones/"+zoneID+"/dns_records?type="+recordType+"&name="+safe, nil)
 	if err != nil {
